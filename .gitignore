@@ -1,0 +1,6 @@
+.venv/
+data.dcm
+data.txt
+reports_found.txt
+run.log
+test.py
