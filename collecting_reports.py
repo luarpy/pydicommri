@@ -6,16 +6,45 @@ import re # for regex expresions
 import argparse
 import signal
 import warnings
+import csv
 
 from pydicom.fileset import FileSet
 from pydicom.data import get_testdata_file
 import pydicom
 
+warnings.filterwarnings("error")  
 report_regex_name = re.compile('^vibe_q-dixon_tra_bh_higado_[0-9][0-9]_Report$', re.IGNORECASE)
 base_path = ''
 modality = 'MR'
 instance_number = 1
+index = ['ID', 
+    'Tanda', 
+    'Repeticion', 
+    'Area_ROI', 
+    'Mean_Fit_Error_ROI', 
+    'Vol_liver', 
+    'Mean_Fit_Error_Vol', 
+    'FF_ROI', 
+    'std_FF_ROI', 
+    'FF_Vol', 
+    'std_FF_Vol', 
+    'R2*_ROI', 
+    'std_R2*_ROI', 
+    'R2*_Vol_px', 
+    'std_R2*_Vol', 
+    'Filename', 
+    'SeriesDescription', 
+    'Modality', 
+    'Comments']
+
 warnings.filterwarnings("error")    
+
+def combine_str(*strings):
+    string = ''
+    for s in strings:
+        if s != None or s != '':
+            string += s + ' '
+    return string
 
 def get_report(ds_overlay, output_dict):
     anno_seq = ds_overlay['GraphicAnnotationSequence']
@@ -27,7 +56,7 @@ def get_report(ds_overlay, output_dict):
         try:
             anno_i['TextObjectSequence'][0]['UnformattedTextValue']
         except:
-            output_dict['Comments'] = str(output_dict.get('Comments')) + 'Not interesting values. '
+            output_dict['Comments'] = combine_str(output_dict.get('Comments'),'Not interesting values.')
             return output_dict
         else:
             aux_str = anno_i['TextObjectSequence'][0]['UnformattedTextValue'].value
@@ -69,7 +98,7 @@ def get_report(ds_overlay, output_dict):
                 output_dict['std_R2*_Vol'] = float(anno_i['TextObjectSequence'][0]['UnformattedTextValue'].value[0:-4])
                 k_section -= -1
 
-    output_dict['Comments'] = output_dict.get('Comments') + 'No comments. ' 
+    output_dict['Comments'] = combine_str(output_dict.get('Comments'), 'No comments.')
     return output_dict
 
 
@@ -111,9 +140,12 @@ def reading_dcm_files(input_folder):
             continue
         try: 
             dicom_data = pydicom.dcmread(file_i) 
-        except RuntimeWarning: # Control for end of file before EOF delimitir runtime warning
+        except : # Control for end of file before EOF delimitir runtime warning
             EOF_hit = True
-            dicom_data = pydicom.dcmread(file_i, force=True)
+            try:
+                dicom_data = pydicom.dcmread(file_i, force=True)
+            except:
+                continue
         finally:
             if (report_regex_name.match(dicom_data.SeriesDescription) and dicom_data.InstanceNumber == instance_number): 
                 print('\tReport found: ' + dicom_data.SeriesDescription, end = '', flush=True)
@@ -126,7 +158,7 @@ def reading_dcm_files(input_folder):
                 try:
                     output_dict.update(get_report(dicom_data, output_dict))
                 except KeyError:
-                    output_dict['Comments'] = str(output_dict.get('Comments')) + 'Keyword error. Could not read values. '
+                    output_dict['Comments'] = combine_str(output_dict.get('Comments'), 'Keyword error. Could not read values.')
 
                 data.append(output_dict) # Only append data if it finds reports of interets
     return data
@@ -139,7 +171,7 @@ def exit_handler(signum, frame):
 def main():
     parser = argparse.ArgumentParser(description='Collect reports from DICOMM files')
     parser.add_argument('search_directory', help='Set dir to search recursively for users reports')
-    parser.add_argument('-o', dest='output_file', default=os.getcwd(), help="Set output dir for loaded data. If no file is set, it will create a 'reports.csv' file in the current directory")
+    parser.add_argument('-o', dest='output_file', default=os.getcwd()+ os.sep + 'reports.csv', help="Set output dir for loaded data. If no file is set, it will create a 'reports.csv' file in the current directory")
     parser.add_argument('-f', dest='input_file',help='Set input file to search for reports')
     args = parser.parse_args()
 
@@ -150,8 +182,6 @@ def main():
 
     if not args.output_file == '':
         output_file = args.output_file
-    else:
-        output_file = os.getcwd() + os.sep + 'reports.csv'
 
     # CTRL+Z and CTRL+C
     signal.signal(signal.SIGTSTP, exit_handler)
@@ -169,19 +199,26 @@ def main():
         exit(1)
     global user_folder_scan
     user_folder_scan = os.scandir(study_dirs)
+    
+    with open(output_file, 'w+') as out_f:
+        writer = csv.writer(out_f)
+        writer.writerow(index)
 
-    all_repotrs = [] # A list of lists
-    for user_i in user_folder_scan: 
-        if not user_i.is_dir(): 
-            continue
-        all_repotrs.append(reading_dcm_files(user_i.name + os.sep))
-        break
-    # print(all_repotrs)
-    print('',end='',flush=True )
-    print('Saving data to {output_file}')
-    import numpy as np
-    np.savetxt(output_file, all_repotrs, delimiter=', ', fmt='% s')
-    user_folder_scan.close()
+        for user_i in user_folder_scan: 
+            data = []
+            if not user_i.is_dir(): 
+                continue
+            print(' ', end='', flush=True)
+            user_reports = reading_dcm_files(user_i.name + os.sep)
+            for report_data in iter(user_reports):
+                writer.writerow(list(report_data.values()))
+            
+        
+        user_folder_scan.close()
+        out_f.close()
+    
+    print('\n', end='', flush=True)
+   
 
 if __name__ == "__main__":
     main()
