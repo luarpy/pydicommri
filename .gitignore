@@ -1,7 +1,8 @@
 .venv/
 .vscode/
-data.dcm
-data.txt
-reports_found.txt
-run.log
-test.py
+pydicom_tools/__pycache__/
+*.py[cod]
+
+pip-log.txt
+pip-delete-this-directory.txt
+
