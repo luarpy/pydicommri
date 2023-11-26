@@ -1,8 +1,16 @@
-.venv/
 .vscode/
-pydicom_tools/__pycache__/
+*.code-workspace
+.directory
+
+.venv/
+pydicommri/.*__pycache__/[*.pyc]
+
+*.egg-info
+
 *.py[cod]
 
 pip-log.txt
 pip-delete-this-directory.txt
 
+samples/
+dist/
