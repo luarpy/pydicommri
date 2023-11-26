@@ -1,0 +1,172 @@
+#!/usb/bin/python
+import os
+import re
+import argparse
+import sys
+import warnings
+from typing import (List, AnyStr, BinaryIO, Union, Optional)
+from re import Pattern
+
+import pydicom
+from pydicom import (Dataset, DataElement)
+from pydicom.fileutil import PathType
+from pydicom.filebase import DicomFileLike
+
+try:
+    from pydicommri.utils.color import Colored, RED, VIOLET, GREEN, BOLD
+except ImportError as e:
+    def Colored(text, *escapes) -> str:
+        return '%s%s%s' % (''.join(escapes), text, '')
+    RED = VIOLET = GREEN = BOLD = ''
+
+
+def __print_result(
+    text: DataElement,
+    pattern: str,
+    *,
+    color: Optional[bool] = True,
+    **kwargs
+) -> None:
+    if color:
+        string = str(text)
+        string_split = string.split(pattern)
+        color_string = ''
+        for i in range(len(string_split)-1):
+            color_string += string_split[i] + Colored(pattern, RED, BOLD)
+        color_string += string_split[len(string_split)-1]
+        
+        print(color_string)
+    else:
+        print(text)
+
+
+def __recursive_match(
+    pattern: Pattern,
+    ds: Dataset,
+    **kwargs
+) -> List[DataElement]:
+    result = []
+    keyword_path = ''
+    if kwargs.get("keyword_path"):
+        keyword_path = kwargs.get("keyword_path") + '.'
+    for elem in ds:
+        if elem.VR == 'SQ':
+            keyword_path += str(elem.keyword)
+            [__recursive_match(pattern, item, keyword_path=keyword_path) for item in elem.value]
+        #FIXME: no hace bien la comparacion. es problema del pattern.match
+        if (pattern.match(str(elem)) or 
+            pattern.search(str(elem.name)) or 
+            pattern.search(str(elem.keyword)) or
+            pattern.search(str(elem.tag)) or
+            pattern.search(str(elem.value)) or
+            pattern.search(str(elem.VR))
+        ):
+            result.append(str(elem))
+        # string = re.match(pattern, str(elem.value))
+        # if string is not None:
+        #     print(string)
+    return result
+
+def __grep(
+    file: Union[str, BinaryIO, Dataset],
+    pattern: str,
+    *,
+    ignore_case: Optional[bool] = False,
+    verbose: Optional[bool] = False,
+    file_number: Optional[int],
+    **kwargs,
+) -> None:
+
+    if isinstance(file, Dataset):
+        dicom_data = file
+    else:
+        if not pydicom.misc.is_dicom(file): 
+            sys.exit('dcmgrep: %s: Is not a DICOM file' % file)
+        dicom_data = pydicom.dcmread(file, force=True)
+
+    if ignore_case == True:
+        __regex = re.compile(str(pattern), re.IGNORECASE)
+    else:
+        __regex = re.compile(str(pattern))
+    
+    if verbose:
+        print("regex pattern: " + pattern)
+    
+    result = []
+
+    # Check if pattern is a DataElement inside the Dataset
+    warnings.filterwarnings("ignore")
+    if pattern in dicom_data:
+        """TODO: no itera sobre todos los elementos dentro de __dicom[pattern]. Debería combrobar si hay secuencias escondidas dentro de estas
+        $ dcmgrep.py "GraphicAnnotationSequence" 20220713.70740.55643.17083.EXTREME
+            (0070, 0001) Graphic Annotation Sequence         SQ: Array of 860 elements
+        """
+        warnings.resetwarnings()
+        result.append(dicom_data[pattern])
+    
+    # Check if pattern is inside the dataset
+    for r in __recursive_match(__regex, dicom_data, **kwargs):
+        result.append(r)
+    
+    for r in result:
+        if kwargs.get("files_with_matches"):
+            if kwargs.get("color"):
+                print(Colored(file, VIOLET))
+            else:
+                print(file)
+        else:
+            if kwargs.get("filename"):
+                if file_number > 1:
+                    if kwargs.get("color"):
+                        print(Colored(file, VIOLET), end=": ")
+                    else:
+                        print(file, end=": ")
+            __print_result(r, pattern, **kwargs)
+
+def dcmgrep(
+    files_path: Union[PathType, BinaryIO, DicomFileLike],
+    pattern: str,
+    *,
+    verbose: Optional[bool] = False,
+    recursive: Optional[bool] = False,
+    **kwargs
+    ) -> None:
+    """
+    Search files for DICOM patterns
+    """
+    for file_path in files_path:
+        if os.path.isfile(file_path):
+            __grep(file_path, pattern, file_number=len(files_path), verbose=verbose, **kwargs)
+        else:
+            if recursive:
+                more_paths = [file_path + '/' + child for child in os.listdir(file_path)]
+                dcmgrep(more_paths, pattern, **kwargs)
+            else:
+                if verbose:
+                    sys.stdout.write('dcmgrep: %s: Is a directory\n' %file_path)
+
+def main():
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument("pattern", type=str, help="regular pattern for search or DataElement to print.")
+    parser.add_argument("files", nargs="+", type=str, help="file(s) to grep")
+    parser.add_argument("--ignore-case", "-i", action=argparse.BooleanOptionalAction, help="ignore case distinctions in patterns and input data, so that characters that differ only in case match each other")
+    parser.add_argument("--verbose", action=argparse.BooleanOptionalAction, help="wheter to print out progress and debug messages")
+    parser.add_argument("--files-with-matches", "-l", action=argparse.BooleanOptionalAction, help="supress normal output; instead print the name of each input file")
+    parser.add_argument("--recursive", "-r", action=argparse.BooleanOptionalAction, help="follow directories")
+    parser.add_argument("--color", "--colour", default=True, action=argparse.BooleanOptionalAction, help="output match strings colorized")
+    parser.add_argument("--filename", default=True, action=argparse.BooleanOptionalAction, help="supress the prefixing of file names on output")
+    parser.add_argument("--quiet", "-q", default=False, action=argparse.BooleanOptionalAction, help="quiet mode")
+    
+    args = parser.parse_args().__dict__
+
+    files = args.pop("files")
+    pattern = args.pop("pattern")
+    
+    try:
+        dcmgrep(files, pattern, **args)
+    except KeyboardInterrupt:
+        print()
+        sys.exit(0)
+            
+if __name__ == "__main__":
+    main()

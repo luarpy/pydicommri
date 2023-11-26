@@ -1,0 +1,24 @@
+#!/bin/python
+# -*- coding: utf-8 -*-
+
+import argparse
+from pydicommri import compute, segmentation
+
+def main():
+    parser = argparse.ArgumentParser(description="PyDICOM MRI CLI")
+    parser.add_argument('--compute', choices=['fat', 'water', 'fatfraction'], required=True, help="Selecciona el cálculo a realizar: 'fatfraction', 'fat' o 'water'")
+    parser.add_argument("in_phase_path", help="Ruta del archivo de fase de entrada.")
+    parser.add_argument("opp_phase_path", help="Ruta del archivo de fase de salida.")
+    parser.add_argument("output_mha_path", help="Ruta del archivo MHA de salida.")
+    parser.add_argument('--segmentation', help="Obtiene la segmentación de los archivos DICOM")
+    parser.add_argument('--input_path', help='Ruta de la carpeta de entrada')
+    parser.add_argument('--output_path', help='Ruta de la carpeta de salida')
+
+    args = parser.parse_args()
+    if hasattr(args, 'compute') and args.compute:
+        compute.compute(args.compute, args.in_phase_path, args.opp_phase_path, args.output_mha_path)
+    if hasattr(args, 'segmentation') and args.segmentation:
+        segmentation.get_segments(args.input_path, args.output_path)
+
+if __name__ == "__main__":
+    main()
